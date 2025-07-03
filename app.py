@@ -1,45 +1,95 @@
-from flask import Flask, send_from_directory, request
-from flask_socketio import SocketIO, emit, join_room
-from threading import Thread
+from flask import Flask, render_template, request
+from flask_socketio import SocketIO, emit
 import time
 import os
+from apscheduler.schedulers.background import BackgroundScheduler
 
-app = Flask(__name__, static_folder='.')
-app.config['SECRET_KEY'] = 'lovelink-secret'
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'love_secret!')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
-# Allow unsafe Werkzeug in production (Render-specific workaround)
-os.environ['WERKZEUG_RUN_MAIN'] = 'true'
-
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
-
-# In-memory session tracker
-rooms = {}
+# Store active pairs {pair_code: [host_sid, partner_sid]}
+active_pairs = {}
+# Store creation times {pair_code: timestamp}
+pair_timestamps = {}
 
 @app.route('/')
-@app.route('/connect/<code>')
-def index(code=None):
-    return send_from_directory('.', 'index.html')
+def index():
+    return render_template('index.html')
 
-@socketio.on('join')
-def on_join(code):
-    join_room(code)
-    rooms[code] = time.time()
+@socketio.on('create_pair')
+def handle_create_pair():
+    code = generate_pairing_code()
+    active_pairs[code] = [request.sid]
+    pair_timestamps[code] = time.time()
+    emit('pair_created', {'code': code}, room=request.sid)
+    print(f"Pair created: {code}")
 
-@socketio.on('status')
-def on_status(data):
-    emit('status', data, to=request.sid, include_self=False, room=request.namespace.rooms[0])
+@socketio.on('join_pair')
+def handle_join_pair(code):
+    if code in active_pairs and len(active_pairs[code]) < 2:
+        active_pairs[code].append(request.sid)
+        # Notify both users that they are paired
+        emit('pair_joined', {'partner_sid': request.sid}, room=active_pairs[code][0])
+        emit('pair_joined', {'partner_sid': active_pairs[code][0]}, room=request.sid)
+        print(f"Pair joined: {code}")
+    else:
+        emit('pair_error', {'message': 'Invalid code or pair full'}, room=request.sid)
 
-@socketio.on('notify')
-def on_notify(data):
-    emit('notify', data, room=request.namespace.rooms[0])
+@socketio.on('user_update')
+def handle_user_update(data):
+    # Data should be encrypted; we decrypt here with the code (which acts as secret)
+    # In a real app, we would use proper end-to-end encryption. Here, we trust the client to have encrypted.
+    for code, sids in active_pairs.items():
+        if request.sid in sids:
+            partner_sid = sids[0] if sids[1] == request.sid else sids[1]
+            emit('partner_update', data, room=partner_sid)
+            break
 
-# Background thread to expire sessions after 24 hours
-def cleanup():
-    while True:
-        now = time.time()
-        expired = [code for code, ts in rooms.items() if now - ts > 86400]
-        for code in expired:
-            del rooms[code]
-        time.sleep(600)
+@socketio.on('send_notification')
+def handle_notification():
+    for code, sids in active_pairs.items():
+        if request.sid in sids:
+            partner_sid = sids[0] if sids[1] == request.sid else sids[1]
+            emit('partner_notification', room=partner_sid)
+            break
 
-Thread(target=cleanup, daemon=True).start()
+@socketio.on('disconnect')
+def handle_disconnect():
+    # Clean up disconnected clients
+    for code, sids in list(active_pairs.items()):
+        if request.sid in sids:
+            sids.remove(request.sid)
+            if not sids:
+                del active_pairs[code]
+                if code in pair_timestamps:
+                    del pair_timestamps[code]
+            else:
+                # Notify the remaining partner
+                emit('partner_disconnected', room=sids[0])
+            break
+
+def check_expired_pairs():
+    current_time = time.time()
+    expired_codes = []
+    for code, timestamp in pair_timestamps.items():
+        if current_time - timestamp > 86400:  # 24 hours
+            expired_codes.append(code)
+    
+    for code in expired_codes:
+        for sid in active_pairs.get(code, []):
+            emit('pair_expired', room=sid)
+        if code in active_pairs:
+            del active_pairs[code]
+        if code in pair_timestamps:
+            del pair_timestamps[code]
+
+# Generate a 6-digit pairing code
+def generate_pairing_code():
+    import random
+    return str(random.randint(100000, 999999))
+
+# Schedule the background task to check for expired pairs
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=check_expired_pairs, trigger="interval", hours=1)
+scheduler.start()
