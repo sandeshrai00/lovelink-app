@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoveLink ❤️</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        header {
+            background: #e91e63;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .screen {
+            padding: 20px;
+            display: none;
+        }
+
+        .active {
+            display: block;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            margin-bottom: 5px;
+        }
+
+        h2 {
+            color: #e91e63;
+            margin: 15px 0 10px;
+            font-size: 1.4rem;
+        }
+
+        .qr-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        #qr-canvas {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto;
+            border: 10px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        .code-display {
+            font-size: 2.5rem;
+            letter-spacing: 5px;
+            color: #e91e63;
+            margin: 20px 0;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .input-group {
+            margin: 20px 0;
+        }
+
+        input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e91e63;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        button {
+            background: #e91e63;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            width: 100%;
+            cursor: pointer;
+            margin: 10px 0;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background: #c2185b;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .heart-btn {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: #e91e63;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px auto;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(233, 30, 99, 0.4);
+            transition: all 0.3s;
+        }
+
+        .heart-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 8px 20px rgba(233, 30, 99, 0.6);
+        }
+
+        .heart-btn::after {
+            content: "❤️";
+            font-size: 2.5rem;
+        }
+
+        .map-container {
+            height: 250px;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+            border: 2px solid #e91e63;
+        }
+
+        .status-container {
+            display: flex;
+            justify-content: space-between;
+            margin: 15px 0;
+        }
+
+        .status-box {
+            background: white;
+            border-radius: 15px;
+            padding: 15px;
+            width: 48%;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+        }
+
+        .battery-display {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .battery-low { color: #ff5722; }
+        .battery-medium { color: #ffc107; }
+        .battery-high { color: #4caf50; }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #4caf50;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 50px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            z-index: 1000;
+            display: none;
+        }
+
+        .camera-container {
+            width: 100%;
+            height: 300px;
+            margin: 15px 0;
+            position: relative;
+        }
+
+        #camera-preview {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 15px;
+        }
+
+        #scan-instruction {
+            position: absolute;
+            bottom: 10px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+        }
+
+        .disclaimer {
+            font-size: 0.8rem;
+            color: #777;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="notification" id="notification">❤️ Your partner is thinking of you!</div>
+
+    <div class="container">
+        <header>
+            <h1>LoveLink ❤️</h1>
+            <p>Share your location and battery status with your partner</p>
+        </header>
+
+        <!-- Home Screen -->
+        <div id="home-screen" class="screen active">
+            <h2>Start Sharing with Your Partner</h2>
+            <button id="create-link-btn">Create Love Link</button>
+            <button id="join-link-btn">Join with Code</button>
+            <p class="disclaimer">Your data is never stored. Connection lasts 24 hours.</p>
+        </div>
+
+        <!-- Create Link Screen -->
+        <div id="create-screen" class="screen">
+            <h2>Your Love Link Code</h2>
+            <div class="code-display" id="pairing-code">------</div>
+            <p>Share this code with your partner:</p>
+
+            <div class="qr-container">
+                <canvas id="qr-canvas"></canvas>
+            </div>
+
+            <div class="input-group">
+                <input type="text" id="share-link" readonly>
+                <button onclick="copyLink()">Copy Link</button>
+            </div>
+
+            <p>Waiting for partner to join...</p>
+            <button id="cancel-create">Cancel</button>
+        </div>
+
+        <!-- Join Screen -->
+        <div id="join-screen" class="screen">
+            <h2>Enter Partner's Code</h2>
+            <div class="input-group">
+                <input type="text" id="partner-code" placeholder="Enter 6-digit code" maxlength="6">
+                <button id="connect-btn">Connect with Partner</button>
+            </div>
+
+            <p>Or scan QR code:</p>
+            <div class="camera-container">
+                <video id="camera-preview"></video>
+                <div id="scan-instruction">Point camera at partner's QR code</div>
+            </div>
+
+            <button id="cancel-join">Cancel</button>
+        </div>
+
+        <!-- Connected Screen -->
+        <div id="connected-screen" class="screen">
+            <h2>Connected with Partner ❤️</h2>
+
+            <div class="map-container" id="user-map"></div>
+            <div class="map-container" id="partner-map"></div>
+
+            <div class="status-container">
+                <div class="status-box">
+                    <h3>Your Battery</h3>
+                    <div class="battery-display" id="user-battery">--%</div>
+                </div>
+                <div class="status-box">
+                    <h3>Partner's Battery</h3>
+                    <div class="battery-display" id="partner-battery">--%</div>
+                </div>
+            </div>
+
+            <div class="heart-btn" id="notify-btn"></div>
+            <p>Tap the heart to notify your partner</p>
+
+            <p class="disclaimer">Connection expires in <span id="expiry-time">24:00:00</span></p>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const screens = {
+            home: document.getElementById('home-screen'),
+            create: document.getElementById('create-screen'),
+            join: document.getElementById('join-screen'),
+            connected: document.getElementById('connected-screen')
+        };
+
+        const pairingCodeEl = document.getElementById('pairing-code');
+        const shareLinkEl = document.getElementById('share-link');
+        const partnerCodeEl = document.getElementById('partner-code');
+        const userBatteryEl = document.getElementById('user-battery');
+        const partnerBatteryEl = document.getElementById('partner-battery');
+        const expiryTimeEl = document.getElementById('expiry-time');
+        const notificationEl = document.getElementById('notification');
+        const cameraPreview = document.getElementById('camera-preview');
+        const scanInstruction = document.getElementById('scan-instruction');
+
+        // App State
+        let currentScreen = 'home';
+        let pairingCode = '';
+        let socket = null;
+        let userMap = null;
+        let partnerMap = null;
+        let userMarker = null;
+        let partnerMarker = null;
+        let partnerLocation = null;
+        let qrScannerActive = false;
+        let expiryTimer = null;
+
+        // Initialize App
+        function initApp() {
+            // Set up screen navigation
+            document.getElementById('create-link-btn').addEventListener('click', showCreateScreen);
+            document.getElementById('join-link-btn').addEventListener('click', showJoinScreen);
+            document.getElementById('cancel-create').addEventListener('click', showHomeScreen);
+            document.getElementById('cancel-join').addEventListener('click', showHomeScreen);
+            document.getElementById('connect-btn').addEventListener('click', connectToPartner);
+            document.getElementById('notify-btn').addEventListener('click', sendNotification);
+
+            // Check if we have a code in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const joinCode = urlParams.get('code');
+
+            if (joinCode && joinCode.length === 6) {
+                partnerCodeEl.value = joinCode;
+                showJoinScreen();
+                connectToPartner();
+            }
+        }
+
+        // Screen Navigation
+        function showScreen(screenName) {
+            Object.values(screens).forEach(screen => {
+                screen.classList.remove('active');
+            });
+            screens[screenName].classList.add('active');
+            currentScreen = screenName;
+        }
+
+        function showHomeScreen() {
+            stopCamera();
+            if (socket) socket.disconnect();
+            showScreen('home');
+        }
+
+        function showCreateScreen() {
+            pairingCode = generatePairingCode();
+            pairingCodeEl.textContent = pairingCode;
+            shareLinkEl.value = `${window.location.origin}?code=${pairingCode}`;
+            generateQRCode(shareLinkEl.value);
+            showScreen('create');
+            connectToServer('host');
+        }
+
+        function showJoinScreen() {
+            showScreen('join');
+            startCamera();
+        }
+
+        // QR Code Generation
+        function generateQRCode(text) {
+            const canvas = document.getElementById('qr-canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Clear canvas
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Generate QR
+            const qrSize = 170;
+            const qrPadding = 15;
+
+            // Simple QR-like pattern (for demo)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(qrPadding, qrPadding, qrSize, qrSize);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(qrPadding + 50, qrPadding + 50, qrSize - 100, qrSize - 100);
+
+            // Add text
+            ctx.fillStyle = '#E91E63';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('LoveLink', canvas.width / 2, qrPadding + qrSize + 25);
+        }
+
+        // Camera Functions
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                cameraPreview.srcObject = stream;
+                qrScannerActive = true;
+                scanQRCode();
+            } catch (err) {
+                scanInstruction.textContent = 'Camera access denied. Please enter code manually.';
+                console.error('Camera error:', err);
+            }
+        }
+
+        function stopCamera() {
+            if (cameraPreview.srcObject) {
+                cameraPreview.srcObject.getTracks().forEach(track => track.stop());
+                cameraPreview.srcObject = null;
+            }
+            qrScannerActive = false;
+        }
+
+        function scanQRCode() {
+            if (!qrScannerActive) return;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = cameraPreview.videoWidth;
+            canvas.height = cameraPreview.videoHeight;
+            const ctx = canvas.getContext('2d');
+
+            ctx.drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+            if (code) {
+                const url = new URL(code.data);
+                const codeParam = url.searchParams.get('code');
+                if (codeParam && codeParam.length === 6) {
+                    partnerCodeEl.value = codeParam;
+                    connectToPartner();
+                    return;
+                }
+            }
+
+            requestAnimationFrame(scanQRCode);
+        }
+
+        // Connection Functions
+        function connectToServer(role) {
+            // Connect to Socket.IO server (will be hosted on Render)
+            socket = io();
+
+            socket.on('connect', () => {
+                console.log('Connected to server');
+
+                if (role === 'host') {
+                    socket.emit('create_pair', pairingCode);
+                } else {
+                    socket.emit('join_pair', pairingCode);
+                }
+            });
+
+            socket.on('pair_created', () => {
+                console.log('Pair created, waiting for partner...');
+            });
+
+            socket.on('pair_joined', () => {
+                console.log('Partner joined!');
+                startSharing();
+                showScreen('connected');
+                startExpiryTimer();
+            });
+
+            socket.on('partner_update', encryptedData => {
+                const data = decryptData(encryptedData, pairingCode);
+                if (data.location) {
+                    updatePartnerLocation(data.location);
+                }
+                if (data.battery !== undefined) {
+                    updatePartnerBattery(data.battery);
+                }
+            });
+
+            socket.on('partner_notification', () => {
+                showNotification();
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server');
+                alert('Connection lost. Please reconnect.');
+                showHomeScreen();
+            });
+
+            socket.on('pair_expired', () => {
+                alert('Your 24-hour connection has expired');
+                showHomeScreen();
+            });
+        }
+
+        function connectToPartner() {
+            const code = partnerCodeEl.value;
+            if (code.length !== 6) {
+                alert('Please enter a 6-digit code');
+                return;
+            }
+
+            pairingCode = code;
+            stopCamera();
+            connectToServer('join');
+        }
+
+        // Location and Battery Sharing
+        async function startSharing() {
+            // Initialize maps
+            initMaps();
+
+            // Start sharing location and battery
+            shareLocation();
+            shareBattery();
+
+            // Set up periodic updates
+            setInterval(shareLocation, 30000);
+            setInterval(shareBattery, 60000);
+        }
+
+        function initMaps() {
+            userMap = L.map('user-map').setView([0, 0], 2);
+            partnerMap = L.map('partner-map').setView([0, 0], 2);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(userMap);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(partnerMap);
+
+            userMarker = L.marker([0, 0]).addTo(userMap)
+                .bindPopup('Your location')
+                .openPopup();
+
+            partnerMarker = L.marker([0, 0]).addTo(partnerMap)
+                .bindPopup('Partner location');
+        }
+
+        function shareLocation() {
+            if (!navigator.geolocation) return;
+
+            navigator.geolocation.getCurrentPosition(position => {
+                const { latitude, longitude } = position.coords;
+
+                // Update user map
+                userMap.setView([latitude, longitude], 13);
+                userMarker.setLatLng([latitude, longitude]);
+
+                // Send to partner
+                const data = { location: { lat: latitude, lng: longitude } };
+                const encrypted = encryptData(data, pairingCode);
+                socket.emit('user_update', encrypted);
+            });
+        }
+
+        async function shareBattery() {
+            if (!navigator.getBattery) return;
+
+            try {
+                const battery = await navigator.getBattery();
+                const batteryPercent = Math.round(battery.level * 100);
+
+                // Update UI
+                updateBatteryUI(userBatteryEl, batteryPercent);
+
+                // Send to partner
+                const data = { battery: batteryPercent };
+                const encrypted = encryptData(data, pairingCode);
+                socket.emit('user_update', encrypted);
+            } catch (error) {
+                console.error('Battery API error:', error);
+            }
+        }
+
+        function updatePartnerLocation(location) {
+            partnerLocation = location;
+            partnerMap.setView([location.lat, location.lng], 13);
+            partnerMarker.setLatLng([location.lat, location.lng]);
+        }
+
+        function updatePartnerBattery(batteryPercent) {
+            updateBatteryUI(partnerBatteryEl, batteryPercent);
+        }
+
+        function updateBatteryUI(element, percent) {
+            element.textContent = `${percent}%`;
+            element.className = 'battery-display ';
+
+            if (percent < 30) element.classList.add('battery-low');
+            else if (percent < 60) element.classList.add('battery-medium');
+            else element.classList.add('battery-high');
+        }
+
+        // Notification System
+        function sendNotification() {
+            socket.emit('send_notification');
+
+            // Local feedback
+            document.body.classList.add('vibrate');
+            setTimeout(() => {
+                document.body.classList.remove('vibrate');
+            }, 300);
+        }
+
+        function showNotification() {
+            notificationEl.style.display = 'block';
+
+            // Vibrate if supported
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+            // Show notification
+            if (Notification.permission === 'granted') {
+                new Notification('❤️ LoveLink Notification', {
+                    body: 'Your partner is thinking about you!'
+                });
+            }
+
+            setTimeout(() => {
+                notificationEl.style.display = 'none';
+            }, 3000);
+        }
+
+        // Encryption Functions
+        function encryptData(data, secret) {
+            return CryptoJS.AES.encrypt(JSON.stringify(data), secret).toString();
+        }
+
+        function decryptData(ciphertext, secret) {
+            try {
+                const bytes = CryptoJS.AES.decrypt(ciphertext, secret);
+                return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
+            } catch (e) {
+                console.error('Decryption error:', e);
+                return {};
+            }
+        }
+
+        // Helper Functions
+        function generatePairingCode() {
+            return Math.floor(100000 + Math.random() * 900000).toString();
+        }
+
+        function copyLink() {
+            shareLinkEl.select();
+            document.execCommand('copy');
+            alert('Link copied to clipboard!');
+        }
+
+        function startExpiryTimer() {
+            let hours = 24;
+            let minutes = 0;
+            let seconds = 0;
+
+            expiryTimer = setInterval(() => {
+                if (seconds === 0) {
+                    if (minutes === 0) {
+                        if (hours === 0) {
+                            clearInterval(expiryTimer);
+                            socket.emit('pair_expired');
+                            return;
+                        }
+                        hours--;
+                        minutes = 59;
+                    } else {
+                        minutes--;
+                    }
+                    seconds = 59;
+                } else {
+                    seconds--;
+                }
+
+                expiryTimeEl.textContent =
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        // Initialize when page loads
+        window.addEventListener('load', initApp);
+
+        // Request notification permission
+        if ('Notification' in window) {
+            Notification.requestPermission();
+        }
+    </script>
+</body>
+</html>
