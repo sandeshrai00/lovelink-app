@@ -1,10 +1,13 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import time
+import eventlet  # Required for production
+
+eventlet.monkey_patch()  # Essential for production deployment
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'love_secret!'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Store active pairs {pair_code: [host_sid, partner_sid]}
 active_pairs = {}
@@ -66,16 +69,18 @@ def handle_disconnect():
 def check_expired_pairs():
     current_time = time.time()
     expired_codes = []
-
+    
     for code, timestamp in pair_timestamps.items():
         if current_time - timestamp > 86400:  # 24 hours
             expired_codes.append(code)
-
+    
     for code in expired_codes:
         for sid in active_pairs.get(code, []):
             emit('pair_expired', room=sid)
-        del active_pairs[code]
-        del pair_timestamps[code]
+        if code in active_pairs:
+            del active_pairs[code]
+        if code in pair_timestamps:
+            del pair_timestamps[code]
 
 if __name__ == '__main__':
     # Start background task to check expired pairs
@@ -84,7 +89,8 @@ if __name__ == '__main__':
         while True:
             check_expired_pairs()
             time.sleep(60)  # Check every minute
-
+    
     threading.Thread(target=expire_checker, daemon=True).start()
-
-    socketio.run(app, debug=True)
+    
+    # Production-ready server configuration
+    socketio.run(app, host='0.0.0.0', port=10000, debug=False, log_output=True)
