@@ -1,49 +1,45 @@
-import os
-import threading
+from flask import Flask, send_from_directory, request
+from flask_socketio import SocketIO, emit, join_room
+from threading import Thread
 import time
-from flask import Flask, send_from_directory
-from flask_socketio import SocketIO, join_room, leave_room
+import os
 
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins='*', async_mode='asgi')
+app = Flask(__name__, static_folder='.')
+app.config['SECRET_KEY'] = 'lovelink-secret'
 
-# In-memory sessions: code -> {'time': timestamp, 'sids': set()}
-sessions = {}
-SESSION_TTL = 24 * 3600
+# Allow unsafe Werkzeug in production (Render-specific workaround)
+os.environ['WERKZEUG_RUN_MAIN'] = 'true'
+
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+# In-memory session tracker
+rooms = {}
 
 @app.route('/')
-def index():
-    return send_from_directory('.', 'index.html')
-
 @app.route('/connect/<code>')
-def connect(code):
+def index(code=None):
     return send_from_directory('.', 'index.html')
 
 @socketio.on('join')
 def on_join(code):
-    sid = threading.current_thread().ident
     join_room(code)
-    sessions.setdefault(code, {{'time': time.time(), 'sids': set()}})['sids'].add(sid)
+    rooms[code] = time.time()
 
-@socketio.on('encrypted')
-def on_encrypted(data):
-    # Broadcast encrypted payload to other in room
-    code = data.get('room') or data.get('code') or request.args.get('code')
-    socketio.emit('encrypted', {{'payload': data['payload']}}, room=code, include_self=False)
+@socketio.on('status')
+def on_status(data):
+    emit('status', data, to=request.sid, include_self=False, room=request.namespace.rooms[0])
 
-# Background cleanup
+@socketio.on('notify')
+def on_notify(data):
+    emit('notify', data, room=request.namespace.rooms[0])
+
+# Background thread to expire sessions after 24 hours
 def cleanup():
     while True:
         now = time.time()
-        expired = [c for c, v in sessions.items() if now - v['time'] > SESSION_TTL]
-        for c in expired:
-            for sid in sessions[c]['sids']:
-                leave_room(c, sid=sid)
-            del sessions[c]
+        expired = [code for code, ts in rooms.items() if now - ts > 86400]
+        for code in expired:
+            del rooms[code]
         time.sleep(600)
 
-threading.Thread(target=cleanup, daemon=True).start()
-
-if __name__ == '__main__':
-    # For local dev
-    socketio.run(app, host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+Thread(target=cleanup, daemon=True).start()
