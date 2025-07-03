@@ -2,6 +2,7 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import time
 import threading
+import os  # Required for port configuration
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'love_secret!'
@@ -89,6 +90,15 @@ if __name__ == '__main__':
     
     threading.Thread(target=expire_checker, daemon=True).start()
     
-    # Production-ready server configuration
-    socketio.run(app, host='0.0.0.0', port=10000, debug=False, log_output=True)
+    # Get port from environment variable or use default
+    port = int(os.environ.get("PORT", 10000))
     
+    # Production-ready server configuration with fix
+    socketio.run(
+        app, 
+        host='0.0.0.0', 
+        port=port, 
+        debug=False, 
+        log_output=True,
+        allow_unsafe_werkzeug=True  # Critical fix for production
+    )
