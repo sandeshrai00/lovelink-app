@@ -2,7 +2,7 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import time
 import threading
-import os  # Required for port configuration
+import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'love_secret!'
@@ -81,24 +81,14 @@ def check_expired_pairs():
         if code in pair_timestamps:
             del pair_timestamps[code]
 
-if __name__ == '__main__':
-    # Start background task to check expired pairs
+# Start background task when app initializes
+def start_background_task():
     def expire_checker():
         while True:
             check_expired_pairs()
             time.sleep(60)  # Check every minute
     
     threading.Thread(target=expire_checker, daemon=True).start()
-    
-    # Get port from environment variable or use default
-    port = int(os.environ.get("PORT", 10000))
-    
-    # Production-ready server configuration with fix
-    socketio.run(
-        app, 
-        host='0.0.0.0', 
-        port=port, 
-        debug=False, 
-        log_output=True,
-        allow_unsafe_werkzeug=True  # Critical fix for production
-    )
+
+# Start the background task when the app starts
+start_background_task()
