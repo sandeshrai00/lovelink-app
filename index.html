@@ -1,118 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>LoveLink</n	>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LoveLink</title>
   <link rel="manifest" href="manifest.json">
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>❤</text></svg>">
   <style>
-    body, html { margin: 0; padding: 0; height: 100%; display: flex; flex-direction: column; font-family: sans-serif; }
-    #app { flex: 1; display: flex; flex-direction: column; }
-    #header { padding: 1rem; text-align: center; background: #ffccd5; }
-    #code, #map-container { flex: 1; display: flex; }
-    #code { justify-content: center; align-items: center; }
-    #qr { width: 150px; height: 150px; border: 1px solid #ccc; }
-    #panels { display: flex; flex: 1; }
-    .panel { flex: 1; position: relative; }
-    .battery { position: absolute; top: 10px; right: 10px; padding: 5px 10px; border-radius: 5px; background: lightgreen; color: #000; }
-    #heart { position: fixed; bottom: 20px; right: 20px; font-size: 2rem; background: #ff6699; color: #fff; border: none; border-radius: 50%; width: 60px; height: 60px; }
-    #notify { display: none; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: sans-serif; background: #fff0f5; }
+    #app { display: flex; flex-direction: column; height: 100%; }
+    header { background: pink; padding: 10px; text-align: center; font-size: 1.5em; color: white; }
+    main { flex: 1; display: flex; flex-direction: column; padding: 10px; }
+    .map-container { flex: 1; display: flex; gap: 10px; }
+    .map { flex: 1; height: 200px; border: 2px solid hotpink; border-radius: 10px; }
+    #pairing { margin: 10px 0; text-align: center; }
+    #code { font-size: 1.2em; font-weight: bold; color: #e91e63; }
+    #qr { margin: 10px auto; display: block; }
+    #batteryStatus { text-align: center; margin: 5px; }
+    .heart-btn { background: none; border: none; font-size: 2em; color: red; cursor: pointer; margin: 10px auto; display: block; }
   </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
-<div id="app">
-  <div id="header">
-    <h1>LoveLink</h1>
-    <div id="pairing">
-      Code: <span id="pair-code"></span>
-      <canvas id="qr"></canvas>
-    </div>
+  <div id="app">
+    <header>❤ LoveLink ❤</header>
+    <main>
+      <div id="pairing">
+        Share this code/link: <span id="code"></span><br/>
+        <canvas id="qr"></canvas>
+      </div>
+      <div class="map-container">
+        <div id="mymap" class="map"></div>
+        <div id="partnermap" class="map"></div>
+      </div>
+      <div id="batteryStatus"></div>
+      <button class="heart-btn" id="notifyBtn">❤</button>
+    </main>
   </div>
-  <div id="panels">
-    <div class="panel" id="you"><div id="map-you"></div><div id="bat-you" class="battery"></div></div>
-    <div class="panel" id="them"><div id="map-them"></div><div id="bat-them" class="battery"></div></div>
-  </div>
-  <button id="heart">❤</button>
-</div>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
+  <script>
+    const secretKey = CryptoJS.lib.WordArray.random(16).toString();
+    const code = location.pathname.split('/connect/')[1] || Math.floor(100000 + Math.random() * 900000).toString();
+    document.getElementById("code").textContent = code;
+    QRCode.toCanvas(document.getElementById('qr'), `https://lovelink.app/connect/${code}`);
 
-<!-- Dependencies -->
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script src="https://cdn.socket.io/4.5.1/socket.io.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
-<script>
-(async () => {
-  // Generate 6-digit code
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-  document.getElementById('pair-code').textContent = code;
-  const url = `${location.origin}/connect/${code}`;
-  // Generate QR
-  const qrCanvas = document.getElementById('qr');
-  new QRious({ element: qrCanvas, value: url, size: 150 });
+    const socket = io();
+    socket.emit('join', code);
 
-  // Encryption key = code
-  const key = CryptoJS.enc.Utf8.parse(code);
+    const encrypt = msg => CryptoJS.AES.encrypt(JSON.stringify(msg), secretKey).toString();
+    const decrypt = msg => JSON.parse(CryptoJS.AES.decrypt(msg, secretKey).toString(CryptoJS.enc.Utf8));
 
-  // Initialize maps
-  const mapYou = L.map('map-you').setView([0,0], 2);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapYou);
-  const markerYou = L.marker([0,0]).addTo(mapYou);
+    // Notification & Vibration
+    document.getElementById("notifyBtn").addEventListener('click', () => {
+      socket.emit("notify", encrypt({ code }));
+    });
 
-  const mapThem = L.map('map-them').setView([0,0], 2);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapThem);
-  const markerThem = L.marker([0,0]).addTo(mapThem);
+    socket.on("notify", data => {
+      const msg = decrypt(data);
+      if (msg.code === code) {
+        navigator.vibrate?.(300);
+        new Notification("Your partner sent you a ❤!");
+      }
+    });
 
-  // Connect Socket.IO
-  const socket = io({ path: '/socket.io' });
-  socket.emit('join', code);
+    // Maps
+    const myMap = L.map('mymap').setView([0, 0], 13);
+    const partnerMap = L.map('partnermap').setView([0, 0], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(myMap);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(partnerMap);
+    let myMarker = L.marker([0,0]).addTo(myMap);
+    let partnerMarker = L.marker([0,0]).addTo(partnerMap);
 
-  // Geolocation + Battery
-  const update = async () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        const data = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        const ct = CryptoJS.AES.encrypt(JSON.stringify(data), key).toString();
-        socket.emit('encrypted', { payload: ct });
-        markerYou.setLatLng([data.lat, data.lng]); mapYou.setView([data.lat,data.lng], 13);
+    // Location + Battery
+    navigator.geolocation.watchPosition(pos => {
+      const { latitude, longitude } = pos.coords;
+      myMarker.setLatLng([latitude, longitude]);
+      myMap.setView([latitude, longitude]);
+      sendStatus(latitude, longitude);
+    });
+
+    function sendStatus(lat, lng) {
+      navigator.getBattery().then(battery => {
+        const percent = Math.round(battery.level * 100);
+        let color = percent > 60 ? 'green' : percent > 30 ? 'orange' : 'red';
+        document.getElementById('batteryStatus').innerHTML = `Battery: <span style="color:${color}">${percent}%</span>`;
+        socket.emit('status', encrypt({ lat, lng, percent, code }));
       });
     }
-    if (navigator.getBattery) {
-      const bat = await navigator.getBattery();
-      const pct = Math.floor(bat.level*100);
-      const el = document.getElementById('bat-you'); el.textContent = pct + '%';
-      el.style.background = pct>60?'lightgreen':pct>30?'yellow':'lightcoral';
-      const ctBat = CryptoJS.AES.encrypt(JSON.stringify({ batt: pct }), key).toString();
-      socket.emit('encrypted', { payload: ctBat });
-    }
-  };
-  setInterval(update, 5000);
 
-  // Receive encrypted
-  socket.on('encrypted', data => {
-    const dec = JSON.parse(CryptoJS.AES.decrypt(data.payload, key).toString(CryptoJS.enc.Utf8));
-    if (dec.lat) { markerThem.setLatLng([dec.lat,dec.lng]); mapThem.setView([dec.lat,dec.lng], 13); }
-    if (dec.batt!==undefined) {
-      const el = document.getElementById('bat-them'); el.textContent = dec.batt + '%';
-      el.style.background = dec.batt>60?'lightgreen':dec.batt>30?'yellow':'lightcoral';
-    }
-  });
+    socket.on("status", data => {
+      const msg = decrypt(data);
+      if (msg.code === code) {
+        partnerMarker.setLatLng([msg.lat, msg.lng]);
+        partnerMap.setView([msg.lat, msg.lng]);
+      }
+    });
 
-  // Heart notification
-  document.getElementById('heart').addEventListener('click', () => {
-    const msg = CryptoJS.AES.encrypt(JSON.stringify({ notify: true }), key).toString();
-    socket.emit('encrypted', { payload: msg });
-  });
-  socket.on('encrypted', data => {
-    const dec = JSON.parse(CryptoJS.AES.decrypt(data.payload, key).toString(CryptoJS.enc.Utf8));
-    if (dec.notify) {
-      if (Notification.permission==='granted') new Notification('❤️ Your partner sent love!');
-      else Notification.requestPermission();
-      if (navigator.vibrate) navigator.vibrate(200);
+    // Ask for permissions
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission();
     }
-  });
-
-  // Request permission
-  if (Notification.permission!=='granted') Notification.requestPermission();
-})();
+  </script>
+</body>
+</html>
