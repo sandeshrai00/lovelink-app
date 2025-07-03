@@ -1,94 +1,49 @@
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit
-import time
-import threading
 import os
+import threading
+import time
+from flask import Flask, send_from_directory
+from flask_socketio import SocketIO, join_room, leave_room
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'love_secret!'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins='*', async_mode='asgi')
 
-# Store active pairs {pair_code: [host_sid, partner_sid]}
-active_pairs = {}
-# Store creation times {pair_code: timestamp}
-pair_timestamps = {}
+# In-memory sessions: code -> {'time': timestamp, 'sids': set()}
+sessions = {}
+SESSION_TTL = 24 * 3600
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return send_from_directory('.', 'index.html')
 
-@socketio.on('create_pair')
-def handle_create_pair(code):
-    if code not in active_pairs:
-        active_pairs[code] = [request.sid]
-        pair_timestamps[code] = time.time()
-        emit('pair_created', room=request.sid)
-        print(f"Pair created: {code}")
+@app.route('/connect/<code>')
+def connect(code):
+    return send_from_directory('.', 'index.html')
 
-@socketio.on('join_pair')
-def handle_join_pair(code):
-    if code in active_pairs and len(active_pairs[code]) < 2:
-        active_pairs[code].append(request.sid)
-        emit('pair_joined', room=active_pairs[code][0])  # Notify host
-        emit('pair_joined', room=request.sid)           # Notify partner
-        print(f"Pair joined: {code}")
+@socketio.on('join')
+def on_join(code):
+    sid = threading.current_thread().ident
+    join_room(code)
+    sessions.setdefault(code, {{'time': time.time(), 'sids': set()}})['sids'].add(sid)
 
-@socketio.on('user_update')
-def handle_user_update(data):
-    # Find partner in the same pair
-    for code, sids in active_pairs.items():
-        if request.sid in sids:
-            partner_sid = sids[0] if sids[1] == request.sid else sids[1]
-            emit('partner_update', data, room=partner_sid)
-            break
+@socketio.on('encrypted')
+def on_encrypted(data):
+    # Broadcast encrypted payload to other in room
+    code = data.get('room') or data.get('code') or request.args.get('code')
+    socketio.emit('encrypted', {{'payload': data['payload']}}, room=code, include_self=False)
 
-@socketio.on('send_notification')
-def handle_notification():
-    # Find partner in the same pair
-    for code, sids in active_pairs.items():
-        if request.sid in sids:
-            partner_sid = sids[0] if sids[1] == request.sid else sids[1]
-            emit('partner_notification', room=partner_sid)
-            break
+# Background cleanup
+def cleanup():
+    while True:
+        now = time.time()
+        expired = [c for c, v in sessions.items() if now - v['time'] > SESSION_TTL]
+        for c in expired:
+            for sid in sessions[c]['sids']:
+                leave_room(c, sid=sid)
+            del sessions[c]
+        time.sleep(600)
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    # Clean up disconnected clients
-    for code, sids in list(active_pairs.items()):
-        if request.sid in sids:
-            sids.remove(request.sid)
-            if not sids:
-                del active_pairs[code]
-                del pair_timestamps[code]
-            else:
-                # Notify remaining partner about disconnect
-                emit('partner_disconnected', room=sids[0])
-            break
+threading.Thread(target=cleanup, daemon=True).start()
 
-def check_expired_pairs():
-    current_time = time.time()
-    expired_codes = []
-    
-    for code, timestamp in pair_timestamps.items():
-        if current_time - timestamp > 86400:  # 24 hours
-            expired_codes.append(code)
-    
-    for code in expired_codes:
-        for sid in active_pairs.get(code, []):
-            emit('pair_expired', room=sid)
-        if code in active_pairs:
-            del active_pairs[code]
-        if code in pair_timestamps:
-            del pair_timestamps[code]
-
-# Start background task when app initializes
-def start_background_task():
-    def expire_checker():
-        while True:
-            check_expired_pairs()
-            time.sleep(60)  # Check every minute
-    
-    threading.Thread(target=expire_checker, daemon=True).start()
-
-# Start the background task when the app starts
-start_background_task()
+if __name__ == '__main__':
+    # For local dev
+    socketio.run(app, host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
