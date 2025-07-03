@@ -1,5 +1,6 @@
-setuptools==68.0.0  # Provides distutils
 Flask==2.3.3
 flask-socketio==5.3.6
 python-socketio==5.9.0
 eventlet==0.35.1
+gevent==24.2.1
+greenlet==3.0.3
