@@ -1,15 +1,11 @@
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import time
-import gevent
-from gevent import monkey
-
-# Apply gevent monkey patching for async
-monkey.patch_all()
+import threading
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'love_secret!'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Store active pairs {pair_code: [host_sid, partner_sid]}
 active_pairs = {}
@@ -89,9 +85,10 @@ if __name__ == '__main__':
     def expire_checker():
         while True:
             check_expired_pairs()
-            gevent.sleep(60)  # Check every minute
+            time.sleep(60)  # Check every minute
     
-    gevent.spawn(expire_checker)
+    threading.Thread(target=expire_checker, daemon=True).start()
     
     # Production-ready server configuration
     socketio.run(app, host='0.0.0.0', port=10000, debug=False, log_output=True)
+    
